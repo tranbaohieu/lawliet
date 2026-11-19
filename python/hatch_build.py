@@ -10,6 +10,8 @@ Environment variables:
                      run this hook from python/.
                      Default: build it with `go build` from the repository
                      (needs Go and the Go sources next to this directory).
+                     GOEXPERIMENT=simd in the environment builds the AVX2
+                     kernels (experimental; release wheels are scalar).
 
 Wheels only: the sdist does not contain the Go sources, so a wheel built from
 it needs LAWLIET_BINARY. Editable installs stay pure Python and find the binary

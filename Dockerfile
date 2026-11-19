@@ -5,7 +5,10 @@ FROM golang:1.27-alpine AS build
 WORKDIR /src
 COPY . .
 ARG VERSION=dev
-RUN CGO_ENABLED=0 go build -trimpath \
+# SIMD=1: AVX2 distance kernels (GOEXPERIMENT=simd, experimental); default scalar.
+ARG SIMD=
+RUN if [ "$SIMD" = 1 ]; then export GOEXPERIMENT=simd; fi \
+ && CGO_ENABLED=0 go build -trimpath \
       -ldflags "-s -w -X github.com/tranbaohieu/lawliet/internal/version.Version=${VERSION}" \
       -o /out/lawliet ./cmd/lawliet \
  && mkdir -p /out/data

@@ -60,13 +60,13 @@ func TestFlatSearchMetrics(t *testing.T) {
 	q := []float32{1, 0}
 
 	// IP: dot products 1, 0, 2, -1
-	hits := NewFlat(src, IP).Search(q, 2, nil)
+	hits := NewFlat(src, IP).Search(q, 2, nil, SearchParams{})
 	if len(hits) != 2 || hits[0].Slot != 2 || hits[1].Slot != 0 || hits[0].Score != 2 {
 		t.Fatalf("IP: %+v", hits)
 	}
 
 	// L2: distances 0, sqrt2, sqrt5, 2 -> scores are negated distances
-	hits = NewFlat(src, L2).Search(q, 3, nil)
+	hits = NewFlat(src, L2).Search(q, 3, nil, SearchParams{})
 	wantSlots := []uint32{0, 1, 3}
 	wantScores := []float64{0, -math.Sqrt2, -2}
 	for i := range hits {
@@ -80,11 +80,11 @@ func TestFlatSearchAcceptAndK(t *testing.T) {
 	src := sliceSource{{1}, {2}, {3}, {4}}
 	f := NewFlat(src, IP)
 
-	hits := f.Search([]float32{1}, 10, func(s uint32) bool { return s != 3 })
+	hits := f.Search([]float32{1}, 10, func(s uint32) bool { return s != 3 }, SearchParams{})
 	if len(hits) != 3 || hits[0].Slot != 2 {
 		t.Fatalf("accept filter: %+v", hits)
 	}
-	if hits := f.Search([]float32{1}, 0, nil); hits != nil {
+	if hits := f.Search([]float32{1}, 0, nil, SearchParams{}); hits != nil {
 		t.Fatalf("k=0: %+v", hits)
 	}
 }

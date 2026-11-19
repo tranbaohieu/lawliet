@@ -55,12 +55,22 @@ type Source interface {
 
 // Index finds the nearest vectors to a query.
 //
-// Add/Remove are called on every mutation so that graph indexes (e.g. HNSW)
-// can maintain their structure. The flat index ignores them.
+// Add/Remove are called on every mutation (under the collection write lock) so
+// that indexes can maintain their structure; Search may run concurrently with
+// other searches (under the read lock) and must not modify shared state.
 type Index interface {
 	Add(slot uint32, vec []float32)
 	Remove(slot uint32)
 	// Search returns at most k hits, best first. accept filters slots
 	// (tombstones, expired records, metadata filters); nil accepts all.
-	Search(query []float32, k int, accept func(slot uint32) bool) []Hit
+	// accept is called at most once per slot unless the index falls back to
+	// an exact scan.
+	Search(query []float32, k int, accept func(slot uint32) bool, p SearchParams) []Hit
+	Stats() Stats
+}
+
+// Stats describes an index for VINFO.
+type Stats struct {
+	State string // e.g. "trained on 100000 records, nlist=316"
+	Bytes int64  // memory held by the index, on top of the vectors
 }

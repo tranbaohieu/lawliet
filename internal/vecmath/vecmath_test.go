@@ -81,3 +81,55 @@ func BenchmarkDot1536(b *testing.B) {
 		Dot(x, y)
 	}
 }
+
+// The SIMD and scalar paths agree within float32 rounding, for every length
+// (blocks of 32 plus tails).
+func TestSIMDMatchesScalar(t *testing.T) {
+	r := rand.New(rand.NewPCG(7, 7))
+	for _, n := range []int{0, 1, 7, 31, 32, 33, 63, 64, 100, 384, 1000, 1024, 1536} {
+		a, b := make([]float32, n), make([]float32, n+5)
+		for i := range a {
+			a[i] = float32(r.NormFloat64())
+		}
+		for i := range b {
+			b[i] = float32(r.NormFloat64())
+		}
+		for _, f := range []struct {
+			name      string
+			got, want float32
+		}{
+			{"dot", Dot(a, b), dotScalar(a, b)},
+			{"l2", L2Sq(a, b), l2SqScalar(a, b)},
+		} {
+			tol := 1e-4 * float32(math.Max(1, math.Abs(float64(f.want))))
+			if d := f.got - f.want; d > tol || d < -tol {
+				t.Errorf("%s n=%d: %v vs scalar %v (accel %s)", f.name, n, f.got, f.want, Accel())
+			}
+		}
+	}
+}
+
+var benchSink float32
+
+func benchVecs(n int) ([]float32, []float32) {
+	r := rand.New(rand.NewPCG(1, 2))
+	a, b := make([]float32, n), make([]float32, n)
+	for i := range a {
+		a[i], b[i] = r.Float32(), r.Float32()
+	}
+	return a, b
+}
+
+func BenchmarkDot1024(b *testing.B) {
+	x, y := benchVecs(1024)
+	for b.Loop() {
+		benchSink = Dot(x, y)
+	}
+}
+
+func BenchmarkL2Sq1024(b *testing.B) {
+	x, y := benchVecs(1024)
+	for b.Loop() {
+		benchSink = L2Sq(x, y)
+	}
+}

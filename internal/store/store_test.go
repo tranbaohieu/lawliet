@@ -50,7 +50,8 @@ func TestCreateValidation(t *testing.T) {
 		{"", Config{Dim: 2, Index: "flat"}},
 		{"x", Config{Dim: 0, Index: "flat"}},
 		{"x", Config{Dim: MaxDim + 1, Index: "flat"}},
-		{"x", Config{Dim: 2, Index: "hnsw"}},
+		{"x", Config{Dim: 2, Index: "annoy"}},
+		{"x", Config{Dim: 2, Index: "hnsw", IndexOpts: index.Options{NList: 4}}},
 		{"x", Config{Dim: 2, Metric: 99, Index: "flat"}},
 	}
 	for _, b := range bad {

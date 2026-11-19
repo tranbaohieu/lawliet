@@ -6,14 +6,19 @@
 //	repeat n_coll:
 //	  name str | dim uint32 | metric uint8 | index uint8 | max_vec uint32 | policy uint8
 //	  [v2+] has_cache_threshold uint8 | cache_threshold float64 | cache_ttl_sec int64
+//	  [v3+] quant uint8 | m, ef_construction, ef_search, nlist, nprobe, pq_m, rerank uint32
 //	  n_rec uint32
 //	  repeat n_rec: id str | vector dim×float32 | text str | meta str (JSON, "" = none) | expireAt int64
 //	crc32 uint32 (IEEE, over everything above)
 //
 //	str = uint32 length + bytes
 //
-// Version history: 1 = MVP; 2 = adds the semantic cache defaults per collection.
-// Readers accept every version up to the current one.
+// Version history: 1 = MVP; 2 = adds the semantic cache defaults per collection;
+// 3 = adds hnsw/ivf indexes and their options. Index structures are not stored:
+// they are rebuilt while records are restored.
+// Readers accept every version up to the current one. Writers use the lowest
+// version that holds the data: 2 while every collection is flat with default
+// options, so an older binary (v0.2.x) can still read the file.
 package snapshot
 
 import (
@@ -33,7 +38,7 @@ import (
 
 const (
 	magic   = "LWDB"
-	version = 2
+	version = 3
 
 	// maxStrLen bounds strings read from a file, so a corrupt length cannot
 	// trigger a huge allocation (same bound as a RESP bulk string).
@@ -41,7 +46,7 @@ const (
 )
 
 // index type codes in the file
-var indexCodes = map[string]uint8{"flat": 0}
+var indexCodes = map[string]uint8{index.KindFlat: 0, index.KindHNSW: 1, index.KindIVF: 2}
 
 // ErrCorrupt reports an unreadable snapshot file.
 var ErrCorrupt = errors.New("corrupt snapshot")
@@ -83,6 +88,17 @@ func (e *encoder) vec(v []float32) {
 	}
 }
 
+// writeVersion is the lowest format version that can hold cols: 3 only when a
+// collection uses an index other than plain flat (v3 fields), else 2.
+func writeVersion(cols []*store.Collection) uint16 {
+	for _, c := range cols {
+		if cfg := c.Config(); cfg.Index != index.KindFlat || cfg.IndexOpts != (index.Options{}) {
+			return version
+		}
+	}
+	return 2
+}
+
 // Write encodes all collections of st to w. Each collection is dumped under
 // its read lock, one at a time.
 func Write(w io.Writer, st *store.Store) (Stats, error) {
@@ -92,8 +108,9 @@ func Write(w io.Writer, st *store.Store) (Stats, error) {
 
 	var stats Stats
 	cols := st.Collections()
+	fileVersion := writeVersion(cols)
 	e.w.WriteString(magic)
-	e.u16(version)
+	e.u16(fileVersion)
 	e.u32(uint32(len(cols)))
 	for _, c := range cols {
 		err := c.Dump(
@@ -115,6 +132,13 @@ func Write(w io.Writer, st *store.Store) (Stats, error) {
 				}
 				e.f64(h.Config.CacheThreshold)
 				e.i64(h.Config.CacheTTL)
+				if fileVersion >= 3 {
+					o := h.Config.IndexOpts
+					e.u8(uint8(o.Quant))
+					for _, v := range []int{o.M, o.EfConstruction, o.EfSearch, o.NList, o.NProbe, o.PQM, o.Rerank} {
+						e.u32(uint32(v))
+					}
+				}
 				e.u32(uint32(h.Count))
 				return nil
 			},
@@ -243,6 +267,13 @@ func Read(r io.Reader, st *store.Store) (Stats, error) {
 			threshold = d.f64()
 			cacheTTL = d.i64()
 		}
+		var opts index.Options
+		if fileVersion >= 3 {
+			opts.Quant = index.Quant(d.u8())
+			for _, p := range []*int{&opts.M, &opts.EfConstruction, &opts.EfSearch, &opts.NList, &opts.NProbe, &opts.PQM, &opts.Rerank} {
+				*p = int(d.u32())
+			}
+		}
 		nRec := d.u32()
 		if d.err != nil {
 			break
@@ -257,7 +288,7 @@ func Read(r io.Reader, st *store.Store) (Stats, error) {
 			return stats, corrupt("collection %q: unknown index code %d", name, indexCode)
 		}
 		col, err := st.Restore(name, store.Config{
-			Dim: dim, Metric: metric, Index: indexName, MaxVectors: maxVec, Policy: policy,
+			Dim: dim, Metric: metric, Index: indexName, IndexOpts: opts, MaxVectors: maxVec, Policy: policy,
 			HasCacheThreshold: hasThreshold, CacheThreshold: threshold, CacheTTL: cacheTTL,
 		})
 		if err != nil {

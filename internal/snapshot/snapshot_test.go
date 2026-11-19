@@ -405,10 +405,75 @@ func TestReadVersion1File(t *testing.T) {
 	}
 }
 
-func TestWritesCurrentVersion(t *testing.T) {
+// Flat-only stores are written as v2 (readable by v0.2.x); any hnsw/ivf/quantized
+// collection needs v3.
+func TestWrittenVersion(t *testing.T) {
+	written := func(s *store.Store) int {
+		var buf bytes.Buffer
+		if _, err := Write(&buf, s); err != nil {
+			t.Fatal(err)
+		}
+		return int(buf.Bytes()[4]) | int(buf.Bytes()[5])<<8
+	}
+	s := newStore(&clock{})
+	fill(t, s, 0)
+	if got := written(s); got != 2 {
+		t.Fatalf("flat-only store written as v%d, want 2", got)
+	}
+	if _, err := s.Create("q", store.Config{Dim: 8, Metric: index.L2, Index: "flat",
+		IndexOpts: index.Options{Quant: index.QuantSQ8}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := written(s); got != 3 || version != 3 {
+		t.Fatalf("store with flat+sq8 written as v%d, want 3 (const %d)", got, version)
+	}
+}
+
+// Index kinds and options survive a snapshot; the index is rebuilt on load.
+func TestRoundTripIndexOptions(t *testing.T) {
+	clk := &clock{}
+	src := newStore(clk)
+	cfgs := map[string]store.Config{
+		"g": {Dim: 8, Metric: index.Cosine, Index: index.KindHNSW, IndexOpts: index.Options{M: 8, EfSearch: 40}},
+		"v": {Dim: 8, Metric: index.L2, Index: index.KindIVF,
+			IndexOpts: index.Options{NList: 4, NProbe: 2, Quant: index.QuantPQ, PQM: 4, Rerank: 5}},
+	}
+	r := rand.New(rand.NewPCG(3, 4))
+	for name, cfg := range cfgs {
+		c, err := src.Create(name, cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 200; i++ {
+			v := make([]float32, 8)
+			for j := range v {
+				v[j] = r.Float32()
+			}
+			if _, err := c.Add(fmt.Sprintf("r%d", i), store.Record{Vector: v}, store.Upsert); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	var buf bytes.Buffer
-	Write(&buf, newStore(&clock{}))
-	if got := int(buf.Bytes()[4]) | int(buf.Bytes()[5])<<8; got != version || version != 2 {
-		t.Fatalf("written version %d, const %d", got, version)
+	if _, err := Write(&buf, src); err != nil {
+		t.Fatal(err)
+	}
+	dst := newStore(clk)
+	if _, err := Read(&buf, dst); err != nil {
+		t.Fatal(err)
+	}
+	for name, cfg := range cfgs {
+		c, err := dst.Get(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := c.Config(); got.Index != cfg.Index || got.IndexOpts != cfg.IndexOpts {
+			t.Fatalf("%s: config %+v, want %+v", name, got, cfg)
+		}
+		rec, _ := c.Get("r9")
+		hits, err := c.Search(rec.Vector, store.SearchOptions{K: 1})
+		if err != nil || len(hits) != 1 || hits[0].ID != "r9" {
+			t.Fatalf("%s: search after load: %v %v", name, hits, err)
+		}
 	}
 }

@@ -20,8 +20,9 @@ const MaxVectorsLimit = 1<<31 - 1
 type Config struct {
 	Dim        int
 	Metric     index.Metric
-	Index      string // "flat" (MVP)
-	MaxVectors int    // 0 = unlimited
+	Index      string        // index.KindFlat, KindHNSW or KindIVF
+	IndexOpts  index.Options // zero = defaults
+	MaxVectors int           // 0 = unlimited
 	Policy     Policy
 
 	// Semantic cache defaults for VCACHE.* (DESIGN.md §16.1). Mutable.
@@ -39,8 +40,8 @@ func (c Config) validate() error {
 	default:
 		return &ConfigError{Msg: "invalid metric"}
 	}
-	if c.Index != "flat" {
-		return &ConfigError{Msg: "unsupported index '" + c.Index + "' (MVP supports: flat)"}
+	if err := index.Validate(c.Index, c.Dim, c.IndexOpts); err != nil {
+		return &ConfigError{Msg: err.Error()}
 	}
 	if c.MaxVectors < 0 || c.MaxVectors > MaxVectorsLimit {
 		return &ConfigError{Msg: "MAX_VECTORS must be between 0 and 2147483647"}
@@ -92,6 +93,7 @@ type SearchOptions struct {
 	WithText    bool
 	WithMeta    bool
 	NoTouch     bool // do not count returned records as accessed (LRU); see Touch
+	Params      index.SearchParams
 }
 
 // Result is one search hit with its external ID. Optional fields are set
@@ -113,6 +115,7 @@ type Info struct {
 	Slots       int   // allocated slots, including tombstones
 	VectorBytes int64 // memory held by the vector slab
 	MemoryBytes int64 // estimated memory of all records (DESIGN.md §8.2)
+	IndexStats  index.Stats
 }
 
 // Collection holds records of one vector space.
@@ -157,7 +160,11 @@ func newCollection(name string, cfg Config, st *Store) *Collection {
 		idToSlot: make(map[string]uint32),
 		ttlSlots: make(map[uint32]struct{}),
 	}
-	c.idx = index.NewFlat(c, cfg.Metric)
+	idx, err := index.New(c, cfg.Metric, cfg.Dim, cfg.Index, cfg.IndexOpts)
+	if err != nil {
+		panic("store: invalid index config: " + err.Error()) // validated by Create/Restore
+	}
+	c.idx = idx
 	return c
 }
 
@@ -385,7 +392,7 @@ func (c *Collection) Search(query []float32, opt SearchOptions) ([]Result, error
 		return opt.Filter == nil || opt.Filter(c.metas[slot])
 	}
 
-	hits := c.idx.Search(q, opt.K, accept)
+	hits := c.idx.Search(q, opt.K, accept, opt.Params)
 	out := make([]Result, len(hits))
 	for i, h := range hits {
 		if !opt.NoTouch {
@@ -423,5 +430,6 @@ func (c *Collection) Info() Info {
 		Slots:       len(c.slotToID),
 		VectorBytes: c.vectors.Bytes(),
 		MemoryBytes: c.memBytes,
+		IndexStats:  c.idx.Stats(),
 	}
 }

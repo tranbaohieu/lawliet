@@ -23,7 +23,9 @@ jobs:
           go-version-file: go.mod
 
       - name: test
-        run: go test -race -count=1 ./...
+        run: |
+          go test -race -count=1 ./...
+          GOEXPERIMENT=simd go test -race -count=1 ./...
 
       - name: build binaries
         env:

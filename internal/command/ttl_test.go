@@ -35,7 +35,7 @@ func TestVAddWithTTL(t *testing.T) {
 	expect(t, do("VTTL", "v", "b"), ":2") // 1.5s rounds like Redis TTL
 	expect(t, do("VTTL", "v", "c"), ":-1")
 	expect(t, do("VTTL", "v", "missing"), ":-2")
-	expect(t, do("VINFO", "v"), `*[$"name" $"v" $"dim" :1 $"metric" $"ip" $"index" $"flat" $"count" :3 $"expires" :2 $"max_vectors" :0 $"policy" $"noeviction" $"cache_threshold" nil $"cache_ttl" :0 $"memory_bytes" :306 $"vector_bytes" :4096]`)
+	expect(t, do("VINFO", "v"), `*[$"name" $"v" $"dim" :1 $"metric" $"ip" $"index" $"flat" $"count" :3 $"expires" :2 $"max_vectors" :0 $"policy" $"noeviction" $"cache_threshold" nil $"cache_ttl" :0 $"memory_bytes" :306 $"vector_bytes" :4096 $"index_params" $"" $"index_state" $"exact" $"index_bytes" :0]`)
 
 	clk.advance(1500 * time.Millisecond)
 	expect(t, do("VEXISTS", "v", "b"), ":0")

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tranbaohieu/lawliet/internal/vecmath"
 	"github.com/tranbaohieu/lawliet/internal/version"
 )
 
@@ -209,6 +210,7 @@ func cmdInfo(c *Conn, args [][]byte) {
 		{"os", runtime.GOOS},
 		{"arch", runtime.GOARCH},
 		{"process_id", strconv.Itoa(os.Getpid())},
+		{"vector_simd", vecmath.Accel()},
 		{"tcp_port", port},
 		{"uptime_in_seconds", strconv.FormatInt(int64(s.Uptime().Seconds()), 10)},
 	})

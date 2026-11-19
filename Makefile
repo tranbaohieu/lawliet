@@ -1,6 +1,11 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X github.com/tranbaohieu/lawliet/internal/version.Version=$(VERSION)
 PYTHON  ?= python3
+# SIMD=1 builds the AVX2 distance kernels (internal/vecmath/simd_amd64.go) with
+# GOEXPERIMENT=simd, an experimental Go toolchain flag. Default: scalar, as releases.
+ifeq ($(SIMD),1)
+export GOEXPERIMENT := simd
+endif
 
 .PHONY: build run test race vet fmt fmt-check e2e bench docker py-wheel py-test clean
 

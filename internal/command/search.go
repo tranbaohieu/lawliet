@@ -2,6 +2,7 @@ package command
 
 import (
 	"github.com/tranbaohieu/lawliet/internal/filter"
+	"github.com/tranbaohieu/lawliet/internal/index"
 	"github.com/tranbaohieu/lawliet/internal/server"
 	"github.com/tranbaohieu/lawliet/internal/store"
 )
@@ -9,6 +10,10 @@ import (
 // VSEARCH <col> (FP32 <blob> | VALUES <n> v...)
 //
 //	[K <n>] [FILTER <expr>] [WITHTEXT] [WITHMETA] [WITHVEC]
+//	[EF <n>] [NPROBE <n>] [RERANK <n>]
+//
+// EF / NPROBE / RERANK override the index search options for this query
+// (ignored by indexes they do not apply to).
 //
 // Reply: array of hits, best first. Each hit is
 // [id, score, (text), (meta_json), (vector)] — optional parts appear in this
@@ -40,6 +45,24 @@ func (h *handlers) vsearch(c *server.Conn, args [][]byte) {
 				return
 			}
 			opt.Filter = f.Match
+			i++
+		case isKeyword(args[i], "EF") && i+1 < len(args):
+			if opt.Params.EfSearch, err = parseInt(args[i+1], "EF", 1, 4096); err != nil {
+				writeErr(c, err)
+				return
+			}
+			i++
+		case isKeyword(args[i], "NPROBE") && i+1 < len(args):
+			if opt.Params.NProbe, err = parseInt(args[i+1], "NPROBE", 1, index.MaxNList); err != nil {
+				writeErr(c, err)
+				return
+			}
+			i++
+		case isKeyword(args[i], "RERANK") && i+1 < len(args):
+			if opt.Params.Rerank, err = parseInt(args[i+1], "RERANK", 1, index.MaxRerank); err != nil {
+				writeErr(c, err)
+				return
+			}
 			i++
 		case isKeyword(args[i], "WITHTEXT"):
 			opt.WithText = true

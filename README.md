@@ -136,12 +136,12 @@ python examples/python/rag_demo.py
 
 | Command | Purpose |
 |---|---|
-| `VCREATE col DIM n [METRIC cosine\|l2\|ip] [MAX_VECTORS n] [POLICY p] [CACHE_THRESHOLD s] [CACHE_TTL sec]` | create a collection |
+| `VCREATE col DIM n [METRIC cosine\|l2\|ip] [INDEX flat\|hnsw\|ivf …] [MAX_VECTORS n] [POLICY p] [CACHE_THRESHOLD s] [CACHE_TTL sec]` | create a collection ([index options](DESIGN.md#71-kinds-and-options)) |
 | `VDROP col` · `VLIST` · `VINFO col` | drop, list, inspect |
 | `VCONFIG col GET` · `VCONFIG col SET POLICY p MAX_VECTORS n CACHE_THRESHOLD s CACHE_TTL sec` | change limits / cache defaults at runtime |
 | `VADD col id (FP32 blob \| VALUES n v…) [TEXT s] [META json] [EX s \| PX ms] [NX \| XX]` | insert or replace a record |
 | `VGET col id [WITHVEC]` · `VDEL col id…` · `VEXISTS col id` · `VCOUNT col` | read, delete, check, count |
-| `VSEARCH col (FP32 blob \| VALUES n v…) [K n] [FILTER expr] [WITHTEXT] [WITHMETA] [WITHVEC]` | nearest neighbours |
+| `VSEARCH col (FP32 blob \| VALUES n v…) [K n] [FILTER expr] [WITHTEXT] [WITHMETA] [WITHVEC] [EF n] [NPROBE n] [RERANK n]` | nearest neighbours |
 | `VEXPIRE col id s` · `VTTL col id` · `VPERSIST col id` | TTL management |
 | `VCACHE.GET col (FP32 blob \| VALUES n v…) [THRESHOLD s] [FILTER expr] [WITHMETA]` | cached answer if score ≥ threshold, else null |
 | `VCACHE.SET col id (FP32 blob \| VALUES n v…) TEXT answer [META json] [EX s \| PX ms]` | store an answer (default TTL = `CACHE_TTL`) |
@@ -191,7 +191,12 @@ roadmap) is needed.
 
 ## Limitations
 
-- **Exact search only** (flat index); one query uses one CPU core.
+- **Approximate indexes are new** (`INDEX hnsw|ivf`, `QUANT sq8|pq`): recall matches Faiss, but
+  queries are 1.7–3× slower than Faiss in release builds (scalar), 1.1–1.7× with the opt-in AVX2
+  kernels (`make build SIMD=1`, experimental Go flag; PQ 2–3×), IVF/PQ training blocks one `VADD` for
+  up to seconds ([TD-2](TECH_DEBT.md)) and HNSW loses ~0.01 recall under heavy churn
+  ([TD-3](TECH_DEBT.md)).
+  [Benchmark](docs/benchmarks/ann-2026-11-16/README.md). One query uses one CPU core.
 - **`--maxmemory` limits the estimated record size, not process memory.** Freed vector
   slots are kept for reuse and the Go GC needs headroom; measured process memory can be
   1.5–3× the limit. Tracked as [TD-1](TECH_DEBT.md).
@@ -214,7 +219,7 @@ make py-test       # Python package tests against bin/lawliet (needs: pip instal
 
 Layout: `cmd/lawliet` (main), `internal/resp` (protocol), `internal/server`,
 `internal/command` (V* commands), `internal/store` (collections, TTL, eviction),
-`internal/index` (flat search), `internal/filter`, `internal/meta`, `internal/snapshot`,
+`internal/index` (flat, hnsw, ivf, sq8, pq), `internal/filter`, `internal/meta`, `internal/snapshot`,
 `python/` (pip package bundling the binary).
 Design decisions live in [DESIGN.md](DESIGN.md); known debts in [TECH_DEBT.md](TECH_DEBT.md).
 
@@ -227,7 +232,9 @@ general-purpose vector database ([DESIGN.md §1.3](DESIGN.md)). In priority orde
 1. ✅ **`VCACHE.*` semantic cache commands** — threshold lookup, default TTL, hit/miss stats,
    invalidation by filter. Next: optimizations (sliding TTL, per-entry hit counts, ...).
 2. **LangChain and LlamaIndex adapters** — vector store and semantic cache.
-3. **Approximate index** — spike IVF trained with e-means vs HNSW, then implement the winner.
+3. ✅ **Approximate indexes** — HNSW, IVF, SQ8, PQ ([benchmark vs Faiss](docs/benchmarks/ann-2026-11-16/README.md)).
+   AVX2 distance kernels and HNSW delete repair done; next: background training (TD-2),
+   remaining churn loss (TD-3).
 4. **Server-side embedding** — send text, the server computes vectors (Ollama /
    OpenAI-compatible).
 5. **Slab compaction** so `--maxmemory` bounds real memory ([TD-1](TECH_DEBT.md)).

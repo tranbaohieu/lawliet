@@ -44,7 +44,7 @@ func TestCollectionLifecycle(t *testing.T) {
 	want(t, c.Do("VLIST"), `*[$"docs" $"faq"]`)
 
 	want(t, c.Do("VINFO", "docs"),
-		`*[$"name" $"docs" $"dim" :3 $"metric" $"cosine" $"index" $"flat" $"count" :0 $"expires" :0 $"max_vectors" :0 $"policy" $"noeviction" $"cache_threshold" nil $"cache_ttl" :0 $"memory_bytes" :0 $"vector_bytes" :0]`)
+		`*[$"name" $"docs" $"dim" :3 $"metric" $"cosine" $"index" $"flat" $"count" :0 $"expires" :0 $"max_vectors" :0 $"policy" $"noeviction" $"cache_threshold" nil $"cache_ttl" :0 $"memory_bytes" :0 $"vector_bytes" :0 $"index_params" $"" $"index_state" $"exact" $"index_bytes" :0]`)
 	want(t, c.Do("VINFO", "faq").Map()["metric"], `$"l2"`)
 
 	want(t, c.Do("VDROP", "faq"), ":1")
@@ -62,7 +62,12 @@ func TestVCreateErrors(t *testing.T) {
 		{[]any{"VCREATE", "x", "DIM", 0}, "ERR DIM must be an integer between 1 and 65536"},
 		{[]any{"VCREATE", "x", "DIM", "abc"}, "ERR DIM must be an integer"},
 		{[]any{"VCREATE", "x", "DIM", 3, "METRIC", "hamming"}, "ERR unknown metric 'hamming'"},
-		{[]any{"VCREATE", "x", "DIM", 3, "INDEX", "hnsw"}, "ERR unsupported index 'hnsw'"},
+		{[]any{"VCREATE", "x", "DIM", 3, "INDEX", "annoy"}, "ERR unknown index 'annoy'"},
+		{[]any{"VCREATE", "x", "DIM", 3, "INDEX", "hnsw", "NLIST", 10}, "ERR NLIST does not apply to INDEX hnsw"},
+		{[]any{"VCREATE", "x", "DIM", 3, "NPROBE", 2}, "ERR NPROBE does not apply to INDEX flat"},
+		{[]any{"VCREATE", "x", "DIM", 3, "INDEX", "ivf", "QUANT", "int4"}, "ERR unknown QUANT 'int4'"},
+		{[]any{"VCREATE", "x", "DIM", 3, "INDEX", "ivf", "QUANT", "pq", "PQ_M", 2}, "ERR PQ_M must divide DIM (3)"},
+		{[]any{"VCREATE", "x", "DIM", 3, "INDEX", "hnsw", "M", 0}, "ERR M must be an integer between 1"},
 		{[]any{"VCREATE", "x", "DIM", 3, "BOGUS", 1}, "ERR syntax error"},
 		{[]any{"VCREATE", "x", "DIM", 3, "METRIC"}, "ERR syntax error"},
 		{[]any{"VCREATE", "x", "DIM"}, "ERR wrong number of arguments"},

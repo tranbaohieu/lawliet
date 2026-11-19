@@ -1,0 +1,9 @@
+{
+  "source": "wikimedia/wikipedia 20231101.vi",
+  "n": 100000,
+  "queries": 1000,
+  "dim": 1024,
+  "model": "embedding",
+  "embed_seconds": 689.9,
+  "norm_mean": 1.0
+}

@@ -140,7 +140,7 @@ No Redis-style numbered databases. `SELECT 0` returns `OK`; other indexes return
 | `name`        | string, unique                               | no      |
 | `dim`         | int > 0                                      | no      |
 | `metric`      | `cosine` (default) \| `l2` \| `ip`           | no      |
-| `index`       | `flat` (MVP)                                 | no (MVP)|
+| `index`       | `flat` (default) \| `hnsw` \| `ivf` + options (§7) | no      |
 | `max_vectors` | int, 0 = unlimited                           | yes     |
 | `policy`      | `noeviction` \| `allkeys-lru` \| `volatile-ttl` (default from server flag) | yes |
 | `cache_threshold` | float, unset by default; default `THRESHOLD` for `VCACHE.GET` | yes |
@@ -274,7 +274,10 @@ Scores are written with `WriteDouble`: RESP3 double, or bulk string in RESP2.
 ### 5.1 Collections
 
 ```
-VCREATE <col> DIM <n> [METRIC cosine|l2|ip] [INDEX flat]
+VCREATE <col> DIM <n> [METRIC cosine|l2|ip] [INDEX flat|hnsw|ivf]
+        [M <n>] [EF_CONSTRUCTION <n>] [EF_SEARCH <n>]                  (hnsw)
+        [NLIST <n>] [NPROBE <n>]                                       (ivf)
+        [QUANT none|sq8|pq] [PQ_M <n>] [RERANK <n>]                    (flat, ivf)
         [MAX_VECTORS <n>] [POLICY noeviction|allkeys-lru|volatile-ttl]
         [CACHE_THRESHOLD <score>] [CACHE_TTL <sec>]                     → +OK
 VDROP   <col>                                                           → :1 | :0
@@ -289,7 +292,8 @@ VCONFIG <col> SET CACHE_TTL <sec>                                       → +OK
 
 `VINFO` reply is a map (flat array in RESP2). Fields: `name, dim, metric, index, count, expires,
 max_vectors, policy, cache_threshold` (null if unset), `cache_ttl, memory_bytes` (estimated,
-§8.2), `vector_bytes` (allocated slab). `VCONFIG GET` returns `max_vectors, policy,
+§8.2), `vector_bytes` (allocated slab), then `index_params, index_state, index_bytes` (§7.1; added
+last so positional RESP2 parsers are not affected). `VCONFIG GET` returns `max_vectors, policy,
 cache_threshold, cache_ttl`.
 
 `VCONFIG <col> SET` accepts several `param value` pairs; all are validated before any change is
@@ -333,7 +337,11 @@ VPERSIST <col> <id>         → :1 | :0
 ```
 VSEARCH <col> (FP32 <blob> | VALUES <dim> v...)
         [K <n>] [FILTER <expr>] [WITHTEXT] [WITHMETA] [WITHVEC]
+        [EF <n>] [NPROBE <n>] [RERANK <n>]
 ```
+
+`EF` (1–4096), `NPROBE` (1–65536) and `RERANK` (1–100) override the index search options for
+this query (§7); they are ignored by indexes they do not apply to.
 
 `K` defaults to 10, range 1–10000. Reply: array of hits, best first. Each hit is an array:
 
@@ -458,12 +466,68 @@ Example:
 
 ---
 
-## 7. Search (Flat Index)
+## 7. Search and Indexes
+
+All indexes sit behind `index.Index` (`internal/index`), read full vectors from the collection
+slab, and see deletions only through the `accept` function (tombstones, expired records,
+`FILTER`). Scores are always exact: quantized candidates are re-scored with the stored vectors.
+
+### 7.1 Kinds and options
+
+| `INDEX` | Faiss equivalent | Options (default) |
+|---|---|---|
+| `flat` | `IndexFlat` | — |
+| `flat QUANT sq8` | `IndexScalarQuantizer` (8 bit) + refine | `RERANK` (1) |
+| `flat QUANT pq` | `IndexPQ` (8 bit codes) + refine | `PQ_M` (DIM/16, must divide DIM), `RERANK` (1) |
+| `hnsw` | `IndexHNSWFlat` | `M` (16), `EF_CONSTRUCTION` (100), `EF_SEARCH` (64) |
+| `ivf` | `IndexIVFFlat` | `NLIST` (auto ≈ √n), `NPROBE` (auto = NLIST/16) |
+| `ivf QUANT sq8` | `IndexIVFScalarQuantizer` (non-residual) + refine | + `RERANK` |
+| `ivf QUANT pq` | `IndexIVFPQ` (residual) + refine | + `PQ_M`, `RERANK` |
+
+Options that do not apply to the kind are rejected by `VCREATE`. `VINFO` reports
+`index_params` (effective options), `index_state` and `index_bytes` (memory on top of vectors,
+not counted by `maxmemory`).
+
+Distances (`internal/vecmath`) use AVX2 + FMA when built with `GOEXPERIMENT=simd` on amd64
+and the CPU has them (`INFO server` → `vector_simd`); otherwise unrolled scalar loops.
+`GOEXPERIMENT=simd` is an experimental toolchain flag, so it is **opt-in**: release binaries,
+wheels and the Docker image are scalar by default; `make build SIMD=1`,
+`docker build --build-arg SIMD=1` or `GOEXPERIMENT=simd` for the wheel hook build the AVX2
+path. CI tests both builds. Each kernel ends with `VZEROUPPER`
+(`archsimd.ClearAVXUpperBits`): without it Go's SSE scalar code after an AVX kernel pays the
+AVX→SSE transition penalty (measured 3× slower overall). Results can differ from the scalar
+path in the last bits.
+
+### 7.2 Flat
 
 - Iterate all live, non-expired slots; apply filter; compute score.
 - Keep top-K with a **min-heap of size K**.
 - Cosine on normalized vectors = dot product.
-- Later optimization: split slab across goroutines, merge per-worker heaps; loop unrolling / SIMD.
+
+### 7.3 HNSW
+
+- Graph per Malkov & Yashunin: random level per node (mL = 1/ln M), up to `M` links on upper
+  levels and `2M` on level 0, neighbors chosen with the diversity heuristic.
+- Inserts are incremental (each `VADD` under the collection write lock). A delete (or the
+  removal half of an update) takes the node out and repairs the graph: each neighbor that
+  linked to it re-selects its links with the heuristic among its other links and the removed
+  node's links (as hnswlib does). Links from nodes the removed one did not link to are left
+  dangling and skipped while searching; they are dropped the next time that list gets a new
+  link (`connect`), so they neither occupy slots nor block live candidates in the heuristic.
+- Search: greedy descent, then a beam of `max(EF, K)` on level 0. `FILTER` is applied to results
+  while traversing; if fewer than K matches are found the query falls back to an exact scan.
+
+### 7.4 IVF and quantizers
+
+- Training needs data: the index is exact until the collection holds 1000 records (10,000 for
+  PQ; 39 × `NLIST` if `NLIST` is set), then trains k-means (10 Lloyd iterations, ≤ 64 points per
+  cell) and assigns every record. It retrains when the count doubles while the sample is not
+  saturated (always with auto `NLIST`). Training runs inside the `VADD` that crosses the
+  threshold: that call can take seconds (see §16.3).
+- Cells store codes contiguously (slot ids; 1 byte/dim for sq8; `PQ_M` bytes of residual for pq).
+- Search scans the `NPROBE` best cells; quantized scores pick `K × RERANK` candidates, re-scored
+  exactly. Fewer than K matches (selective filter) → exact scan.
+- Index structures are not persisted: snapshots store options (§10.4), indexes are rebuilt on load.
 
 ---
 
@@ -619,12 +683,14 @@ repeat n_coll:
   name       str
   dim        uint32
   metric     uint8
-  index      uint8
+  index      uint8            0 flat, 1 hnsw, 2 ivf
   max_vec    uint32
   policy     uint8
   [v2+] has_cache_threshold uint8
   [v2+] cache_threshold     float64
   [v2+] cache_ttl_sec       int64
+  [v3+] quant               uint8
+  [v3+] m, ef_construction, ef_search, nlist, nprobe, pq_m, rerank   uint32 each
   n_rec      uint32
   repeat n_rec:
     id       str
@@ -644,9 +710,12 @@ normalized again on load (re-normalizing changes the float bits of ~50% of vecto
 the scores).
 Bad magic / version / CRC → refuse to start with a clear error.
 
-Versions: **1** = v0.1.0; **2** = adds the cache defaults per collection. The server writes
-the current version and reads every version up to it (a v1 file loads with no cache
-defaults; `internal/snapshot/testdata/v1.lwdb` guards this).
+Versions: **1** = v0.1.0; **2** = adds the cache defaults per collection; **3** = adds index
+kinds and options (index structures are rebuilt on load). The server writes the lowest
+version that holds the data — v2 while every collection is `flat` with default options, so
+a v0.2.x binary can still read it; v3 otherwise — and reads every version up to the current
+one (a v1 file loads with no cache defaults; `internal/snapshot/testdata/v1.lwdb` guards
+this).
 
 `INFO persistence`: `snapshot_enabled`, `snapshot_path`, `rdb_changes_since_last_save`,
 `rdb_last_save_time`, `rdb_last_save_status`, `rdb_last_save_duration_ms`.
@@ -734,7 +803,7 @@ finalized step by step before implementation, like the MVP commands.
 |---|------|----------------|
 | 1 ✅ | `VCACHE.*` semantic cache commands (§5.7; draft §16.1) | the main differentiator; builds on TTL + eviction |
 | 2 | LangChain & LlamaIndex adapters (§16.2) | how users discover and try Lawliet |
-| 3 | Approximate index: spike IVF + e-means vs HNSW, then implement the winner (§16.3) | needed beyond ~100k vectors per collection |
+| 3 | Approximate index: ✅ spike done — hnsw / ivf / sq8 / pq implemented and benchmarked (§16.3); next: TD-2, TD-3, SIMD | needed beyond ~100k vectors per collection |
 | 4 | Server-side embedding on `VADD` / `VSEARCH` (§16.4) | demos without embedding code |
 | 5 | Return empty slab chunks / compact slabs (TD-1, §8.2) | makes `maxmemory` bound real memory |
 
@@ -801,6 +870,27 @@ Open questions:
 - Mapping rules from their filter syntax to Lawliet `FILTER` (unsupported operators → error).
 
 ### 16.3 Approximate index: IVF + e-means vs HNSW
+
+**Status (2026-11-16): spike done, wider than planned.** Implemented in pure Go behind `Index`
+(§7): HNSW, IVF-Flat (k-means; e-means not yet), IVF-SQ8, IVF-PQ, flat SQ8/PQ. Benchmarked
+against Faiss 1.16 on 100k × 1024 real embeddings:
+[docs/benchmarks/ann-2026-11-16](docs/benchmarks/ann-2026-11-16/README.md).
+
+Results in short: recall equals Faiss for every index; Faiss is 1.7–3× faster per query (SIMD;
+6× for SQ8); HNSW ef=64 gives recall 0.979 at 0.6 ms (flat: 31 ms) without training pauses;
+IVF/PQ training blocks one `VADD` for 4–13 s; HNSW recall drops 0.979 → 0.954 after replacing
+30% of records three times, IVF does not change.
+
+Update (same day): AVX2 kernels and HNSW delete repair. HNSW ef=64 p50 0.60 → 0.44 ms (Faiss
+0.33), build 108 → 64 s, recall after churn 0.954 → 0.971; IVF-SQ8 4.4× faster; IVF training
+pause 3.8 s → 0.9 s. Gap to Faiss is now 1.1–1.7× except PQ (2–3×).
+
+Recommendation: **HNSW as the ANN index for Lawliet** (default parameters M=16, EF_SEARCH 64),
+with one follow-up before calling it production-ready — closing the remaining churn loss
+(TD-3: refill pruned links or rebuild in the background). Keep IVF for batch-loaded, churn-heavy collections
+once training moves off the write path (TD-2). PQ is not worth it while full vectors are kept.
+
+The original plan, kept for reference:
 
 The flat index takes ~54 ms per query at 100k × 1536 (README). An approximate index is
 needed beyond ~100k vectors per collection. Two candidates, behind the existing `Index`

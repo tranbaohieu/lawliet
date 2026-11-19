@@ -19,8 +19,10 @@ jobs:
           if [ -n "$unformatted" ]; then echo "Not gofmt'ed:"; echo "$unformatted"; exit 1; fi
       - name: go vet
         run: go vet ./...
-      - name: unit and integration tests
+      - name: unit and integration tests (scalar)
         run: go test -race -count=1 ./...
+      - name: unit and integration tests (GOEXPERIMENT=simd, AVX2 kernels)
+        run: GOEXPERIMENT=simd go test -race -count=1 ./...
 
   e2e:
     needs: test
