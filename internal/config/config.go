@@ -24,6 +24,7 @@ type Config struct {
 	DBFilename     string
 	SaveRules      []string // raw --save values; nil = not given (use defaults)
 	ShowVersion    bool
+	ExitOnStdinEOF bool // stop when stdin is closed (parent process gone)
 }
 
 // SnapshotPath returns the snapshot file path, or "" if persistence is off.
@@ -68,6 +69,9 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	fs.Var(stringList{&c.SaveRules}, "save",
 		`snapshot rule "<seconds> <changes>", repeatable; "" disables automatic snapshots (default "3600 1", "300 100", "60 10000")`)
 	fs.BoolVar(&c.ShowVersion, "version", false, "print version and exit")
+	fs.BoolVar(&c.ExitOnStdinEOF, "exit-on-stdin-eof", false,
+		"shut down gracefully when stdin is closed; a parent process that keeps a pipe to stdin\n"+
+			"(the Python package) then stops the server by exiting, even when it is killed")
 
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err

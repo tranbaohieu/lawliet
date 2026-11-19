@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -42,6 +43,12 @@ func run(args []string) int {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if cfg.ExitOnStdinEOF {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		defer cancel()
+		go cancelOnEOF(os.Stdin, cancel, logger)
+	}
 
 	policy, err := store.ParsePolicy(cfg.MaxMemoryPol)
 	if err != nil {
@@ -97,6 +104,15 @@ func run(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// cancelOnEOF calls cancel once r reaches EOF or fails. With --exit-on-stdin-eof,
+// stdin is a pipe held by the parent process: it is closed when the parent exits
+// for any reason (including SIGKILL), so the server does not outlive it.
+func cancelOnEOF(r io.Reader, cancel context.CancelFunc, logger *slog.Logger) {
+	_, err := io.Copy(io.Discard, r)
+	logger.Info("stdin closed, shutting down", "err", err)
+	cancel()
 }
 
 // saveRules returns the snapshot rules from --save values: defaults when none

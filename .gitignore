@@ -5,3 +5,8 @@
 *.out
 .DS_Store
 !internal/snapshot/testdata/*.lwdb
+python/dist/
+python/src/lawliet/bin/
+__pycache__/
+*.egg-info/
+.venv/

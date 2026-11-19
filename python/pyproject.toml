@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lawliet-server"
+# Import name stays `lawliet`. "lawliet" on PyPI is an unrelated web framework.
+dynamic = ["version"]
+description = "In-memory vector cache that speaks the Redis protocol. pip install, then start it from Python."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.9"
+dependencies = ["redis>=5"]
+keywords = ["vector", "vector-search", "vector-database", "semantic-cache", "rag", "llm", "redis", "embeddings"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Database",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage = "https://github.com/tranbaohieu/lawliet"
+Documentation = "https://github.com/tranbaohieu/lawliet/blob/main/DESIGN.md"
+Issues = "https://github.com/tranbaohieu/lawliet/issues"
+
+[project.scripts]
+lawliet = "lawliet.__main__:main"
+
+[tool.hatch.version]
+# Set from the git tag by the release workflow; "0.0.0.dev0" marks a local build.
+path = "src/lawliet/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lawliet"]
+exclude = ["src/lawliet/bin"]  # the binary is added by the build hook only
+
+# Bundles the Go binary and sets the platform tag (see hatch_build.py).
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "hatch_build.py"

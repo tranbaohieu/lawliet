@@ -27,6 +27,17 @@ func TestParseFlags(t *testing.T) {
 	}
 }
 
+func TestExitOnStdinEOFFlag(t *testing.T) {
+	c, err := Parse(nil, io.Discard)
+	if err != nil || c.ExitOnStdinEOF {
+		t.Fatalf("default: %v %v", c.ExitOnStdinEOF, err)
+	}
+	c, err = Parse([]string{"--exit-on-stdin-eof"}, io.Discard)
+	if err != nil || !c.ExitOnStdinEOF {
+		t.Fatalf("set: %v %v", c.ExitOnStdinEOF, err)
+	}
+}
+
 func TestParseErrors(t *testing.T) {
 	for _, args := range [][]string{
 		{"--port", "70000"},

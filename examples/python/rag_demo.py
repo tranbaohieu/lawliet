@@ -5,7 +5,11 @@ bag-of-words embedder so the example works anywhere. Replace `embed()` with a
 real model (OpenAI, sentence-transformers, Ollama, ...) and `generate()` with
 your LLM call for real use; nothing else changes.
 
-Usage:
+Usage, with the Python package (server started by the script, nothing else to run):
+    pip install lawliet-server numpy
+    python examples/python/rag_demo.py
+
+or against a server you started yourself on port 6380:
     pip install -r examples/python/requirements.txt
     ./bin/lawliet &                  # or: docker run -p 6380:6380 lawliet
     python examples/python/rag_demo.py
@@ -101,8 +105,21 @@ def answer(r: redis.Redis, question: str, where: str | None = None) -> str:
     return text
 
 
+def connect() -> redis.Redis:
+    """Embedded server from the `lawliet` package if installed, else localhost:6380."""
+    try:
+        import lawliet
+    except ImportError:
+        print("lawliet package not installed: using the server on localhost:6380")
+        return redis.Redis(port=6380)
+    r = lawliet.start()  # stopped automatically when the script exits
+    host, port = r.connection_pool.connection_kwargs["host"], r.connection_pool.connection_kwargs["port"]
+    print(f"using a server started by the lawliet package on {host}:{port} (not localhost:6380)")
+    return r
+
+
 def main() -> None:
-    r = redis.Redis(port=6380)
+    r = connect()
     setup(r)
 
     print("== retrieval")

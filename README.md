@@ -46,6 +46,32 @@ clients work unchanged, and adds the features a RAG prototype needs:
 
 ## Quick start
 
+### Python: `pip install`
+
+The [`lawliet` Python package](python/README.md) bundles the server binary: install it and
+start the server from your script, notebook or test — nothing else to download or run.
+
+```bash
+pip install lawliet-server        # import lawliet
+```
+
+```python
+import lawliet
+
+r = lawliet.start()                  # server on a free port, returns redis.Redis
+r.execute_command("VCREATE", "docs", "DIM", 384)
+...
+lawliet.stop()                       # also stopped automatically at exit
+
+with lawliet.server() as r:          # fresh in-memory server for one block (e.g. a test)
+    ...
+```
+
+Wheels are built for the same platforms as the binaries below and attached to each
+[release](https://github.com/tranbaohieu/lawliet/releases) from the release after v0.2.0
+on; `pip install lawliet-server` works once they are published to PyPI. The package also installs a
+`lawliet` command (`lawliet --port 6380`).
+
 ### Download a binary
 
 Prebuilt binaries for macOS, Linux and Windows are on the
@@ -140,8 +166,10 @@ Details — reply formats, filter grammar, errors — are in [DESIGN.md](DESIGN.
 | `--dir` | empty (off) | enable snapshots in this existing directory |
 | `--dbfilename` | `dump.lwdb` | |
 | `--save "sec changes"` | `3600 1`, `300 100`, `60 10000` | repeatable; `--save ""` disables auto-save |
+| `--exit-on-stdin-eof` | off | shut down when stdin closes (used by the Python package) |
 
-Snapshots are written on save rules, on `SAVE`, and on shutdown (`SIGINT`/`SIGTERM`),
+Snapshots are written on save rules, on `SAVE`, and on shutdown (`SIGINT`/`SIGTERM`, or stdin
+closed with `--exit-on-stdin-eof`),
 and loaded at startup. A corrupt file stops the server instead of loading partial data.
 
 ## Performance
@@ -180,11 +208,14 @@ make race          # with the race detector
 make e2e           # end-to-end checks against a real server (needs python3, redis, numpy)
 make bench         # benchmark
 make docker        # build the image
+make py-wheel      # Python wheel for this machine (needs: pip install build)
+make py-test       # Python package tests against bin/lawliet (needs: pip install -e python pytest)
 ```
 
 Layout: `cmd/lawliet` (main), `internal/resp` (protocol), `internal/server`,
 `internal/command` (V* commands), `internal/store` (collections, TTL, eviction),
-`internal/index` (flat search), `internal/filter`, `internal/meta`, `internal/snapshot`.
+`internal/index` (flat search), `internal/filter`, `internal/meta`, `internal/snapshot`,
+`python/` (pip package bundling the binary).
 Design decisions live in [DESIGN.md](DESIGN.md); known debts in [TECH_DEBT.md](TECH_DEBT.md).
 
 ## Roadmap

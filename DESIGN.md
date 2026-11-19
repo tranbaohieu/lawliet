@@ -102,11 +102,14 @@ lawliet/
 │   ├── filter/                # lexer, parser, evaluator
 │   ├── snapshot/              # .lwdb writer / reader
 │   └── server/servertest/     # test server + RESP client for integration tests
+├── python/                    # pip package: bundles the binary, start()/stop()/Server
+│   └── hatch_build.py         # build hook: binary into wheel, platform tag per GOOS/GOARCH
 ├── examples/python/           # RAG demo (no model download needed)
 ├── scripts/e2e/               # end-to-end checks; run_all.sh runs them all
 ├── scripts/bench/             # end-to-end benchmark
 ├── .github/workflows/ci.yml   # gofmt, vet, race tests, e2e, docker build + smoke test
-├── .github/workflows/release.yml # on tag v*: test, build 5 OS/arch binaries, GitHub Release
+├── .github/workflows/release.yml # on tag v*: test, build 5 OS/arch binaries + Python wheels,
+│                              #   GitHub Release; PyPI when vars.PYPI_PUBLISH == 'true'
 ├── Dockerfile                 # distroless, non-root, listens on 0.0.0.0 in the container
 ├── DESIGN.md
 ├── README.md
@@ -673,6 +676,7 @@ defaults; `internal/snapshot/testdata/v1.lwdb` guards this).
 | `--dir`               | empty → persistence off |
 | `--dbfilename`        | `dump.lwdb`    |
 | `--save`              | see §10.1      |
+| `--exit-on-stdin-eof` | off: when set, graceful shutdown once stdin reaches EOF (parent process gone; used by `python/`) |
 
 ---
 
