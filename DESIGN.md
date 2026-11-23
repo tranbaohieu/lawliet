@@ -872,7 +872,7 @@ Open questions:
 ### 16.3 Approximate index: IVF + e-means vs HNSW
 
 **Status (2026-11-16): spike done, wider than planned.** Implemented in pure Go behind `Index`
-(§7): HNSW, IVF-Flat (k-means; e-means not yet), IVF-SQ8, IVF-PQ, flat SQ8/PQ. Benchmarked
+(§7): HNSW, IVF-Flat (Lloyd k-means; e-means added later, see below), IVF-SQ8, IVF-PQ, flat SQ8/PQ. Benchmarked
 against Faiss 1.16 on 100k × 1024 real embeddings:
 [docs/benchmarks/ann-2026-11-16](docs/benchmarks/ann-2026-11-16/README.md).
 
@@ -889,6 +889,24 @@ Recommendation: **HNSW as the ANN index for Lawliet** (default parameters M=16, 
 with one follow-up before calling it production-ready — closing the remaining churn loss
 (TD-3: refill pruned links or rebuild in the background). Keep IVF for batch-loaded, churn-heavy collections
 once training moves off the write path (TD-2). PQ is not worth it while full vectors are kept.
+
+Update (2026-11-23): **e-means implemented, not the default.** `emeans()` in
+`internal/index/kmeans.go` (port of the reference: decayed counts/sums, batch size and step size
+from the scaling laws, cosine schedule, revival every 5 batches, last-epoch means). IVF training
+goes through the package variables `trainCentroids` (default `lloyd`) and `trainPerCell`
+(default 64 points per cell); nothing is user-facing and the snapshot format is unchanged.
+Small comparison (`TestTrainersCompare`, `BenchmarkTrain`, Apple M4, synthetic clustered data):
+
+| dim × nlist, sample | Lloyd 10 iters | e-means 5 epochs |
+|---|---|---|
+| 128 × 256, 16k points: train time / loss | 304 ms / 86.7 | 155 ms / 84.9 |
+| 128 × 256, 65k points: train time / loss | 1.11 s / 87.7 | 0.63 s / 84.5 |
+| 32 × 64, 4k points, IVF recall@10 nprobe=2 (l2 / cosine) | 0.663 / 0.686 | 0.692 / 0.728 |
+| same, e-means on a 4× sample (16k points) | | 0.721 / 0.750 |
+
+Before switching the default (and possibly raising `trainPerCell`), measure on real embeddings
+at 100k–1M (`scripts/bench/ann`): recall@10 at fixed nprobe, training pause, recall after churn.
+Larger-scale runs are open to contributors.
 
 The original plan, kept for reference:
 

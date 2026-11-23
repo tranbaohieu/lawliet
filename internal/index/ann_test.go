@@ -23,6 +23,11 @@ func (m *memSource) set(s uint32, v []float32) { m.vecs[s] = v; delete(m.dead, s
 // Each call draws new centers: take data and queries from the same call
 // (split) so queries are in-distribution, as in RAG.
 func clustered(rng *rand.Rand, n, dim, nc int, normalize bool) [][]float32 {
+	return clusteredNoise(rng, n, dim, nc, 0.5, normalize)
+}
+
+// clusteredNoise is clustered with a given per-coordinate noise (stddev).
+func clusteredNoise(rng *rand.Rand, n, dim, nc int, noise float32, normalize bool) [][]float32 {
 	centers := make([][]float32, nc)
 	for i := range centers {
 		centers[i] = make([]float32, dim)
@@ -35,7 +40,7 @@ func clustered(rng *rand.Rand, n, dim, nc int, normalize bool) [][]float32 {
 		c := centers[rng.Intn(nc)]
 		v := make([]float32, dim)
 		for j := range v {
-			v[j] = c[j] + 0.5*float32(rng.NormFloat64())
+			v[j] = c[j] + noise*float32(rng.NormFloat64())
 		}
 		if normalize {
 			vecmath.Normalize(v)

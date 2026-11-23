@@ -63,6 +63,13 @@ const (
 	kmeansIters     = 10
 )
 
+// IVF centroid training: the algorithm and the k-means sample size per cell.
+// Variables so tests and benchmarks can compare trainers (lloyd vs emeansTrain).
+var (
+	trainCentroids trainFunc = lloyd
+	trainPerCell             = maxTrainPerCell
+)
+
 // NewIVF returns an IVF index. fixedNList > 0 overrides opts.NList.
 func NewIVF(src Source, metric Metric, dim int, opts Options, fixedNList int) *IVF {
 	return &IVF{src: src, metric: metric, dim: dim, opts: opts, fixed: fixedNList, score: rawScore(metric)}
@@ -119,7 +126,7 @@ func (x *IVF) Add(slot uint32, vec []float32) {
 
 // sampleCap is the largest useful training sample for nlist cells.
 func (x *IVF) sampleCap(nlist int) int {
-	c := maxTrainPerCell * nlist
+	c := trainPerCell * nlist
 	switch x.opts.Quant {
 	case QuantPQ:
 		c = max(c, pqMaxTrain)
@@ -225,8 +232,8 @@ func (x *IVF) train() {
 			}
 		}
 	} else {
-		km := min(sampleSize, maxTrainPerCell*nlist) // the sample is a random permutation: any prefix is random
-		x.cent = kmeans(sample[:km*x.dim], x.dim, nlist, kmeansIters, x.metric != L2, 1)
+		km := min(sampleSize, trainPerCell*nlist) // the sample is a random permutation: any prefix is random
+		x.cent = trainCentroids(sample[:km*x.dim], x.dim, nlist, x.metric != L2, 1)
 	}
 	x.centNorms = nil
 	if x.metric == L2 && nlist > 1 {
