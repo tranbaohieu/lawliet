@@ -185,9 +185,9 @@ your machine will differ.
 | 10,000 | 1536 | 86k vec/s | 5.4 ms | 6.0 ms | 0.9 ms | 984 |
 | 100,000 | 1536 | 88k vec/s | 54.3 ms | 56.4 ms | 12.0 ms | 105 |
 
-Search time grows linearly with the collection size (exact search). Lawliet targets
-up to roughly 100k vectors per collection; beyond that an approximate index (HNSW, on the
-roadmap) is needed.
+Search time grows linearly with the collection size (exact search). Beyond roughly 100k
+vectors per collection use an approximate index (`INDEX hnsw` or `ivf`, see Limitations and the
+[ANN benchmark](docs/benchmarks/ann-2026-11-16/README.md)).
 
 ## Limitations
 
@@ -233,14 +233,14 @@ general-purpose vector database ([DESIGN.md §1.3](DESIGN.md)). In priority orde
    invalidation by filter. Next: optimizations (sliding TTL, per-entry hit counts, ...).
 2. **LangChain and LlamaIndex adapters** — vector store and semantic cache.
 3. ✅ **Approximate indexes** — HNSW, IVF, SQ8, PQ ([benchmark vs Faiss](docs/benchmarks/ann-2026-11-16/README.md)).
-   AVX2 distance kernels and HNSW delete repair done; next: background training (TD-2),
-   remaining churn loss (TD-3).
+   AVX2 distance kernels, HNSW delete repair and an e-means IVF trainer (not default yet) done;
+   next: background training (TD-2), remaining churn loss (TD-3), e-means benchmarks at scale.
 4. **Server-side embedding** — send text, the server computes vectors (Ollama /
    OpenAI-compatible).
 5. **Slab compaction** so `--maxmemory` bounds real memory ([TD-1](TECH_DEBT.md)).
 
-Later: HTTP/REST API · batch insert and delete by filter · metadata indexes · quantization
-(int8, float16) · parallel search and SIMD · AUTH/TLS.
+Later: HTTP/REST API · batch insert and delete by filter · metadata indexes · float16 vectors ·
+parallel search · SIMD on by default and on arm64 · AUTH/TLS.
 
 ## License
 
